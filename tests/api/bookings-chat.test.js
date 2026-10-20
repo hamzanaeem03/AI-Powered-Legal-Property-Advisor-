@@ -5,14 +5,14 @@ import { POST as chatAccess } from "@/app/api/lawyerchat/route"
 import { POST as sendMessage } from "@/app/api/lawyerchat/send/route"
 import { POST as listMessages } from "@/app/api/lawyerchat/messages/route"
 import { Notification } from "@/models/Notification"
-import { createUser, createBooking, loginAs, request, json } from "../helpers"
+import { createUser, createListedLawyer, createBooking, loginAs, request, json } from "../helpers"
 
 vi.spyOn(console, "log").mockImplementation(() => {})
 
 describe("POST /api/booking", () => {
   it("books a verified lawyer and notifies both sides with real names", async () => {
     const client = await createUser({ firstName: "Sara", lastName: "Ali" })
-    const lawyer = await createUser({ userType: "lawyer", verified: true })
+    const lawyer = await createListedLawyer()
     loginAs(client)
 
     const { status, body } = await json(await book(request("/api/booking", { method: "POST", body: { lawyerId: lawyer._id.toString() } })))
@@ -27,7 +27,7 @@ describe("POST /api/booking", () => {
   it("refuses unverified lawyers, duplicates, and non-clients", async () => {
     const client = await createUser()
     const unverified = await createUser({ userType: "lawyer", verified: false })
-    const lawyer = await createUser({ userType: "lawyer", verified: true })
+    const lawyer = await createListedLawyer()
 
     loginAs(client)
     expect((await book(request("/x", { method: "POST", body: { lawyerId: unverified._id.toString() } }))).status).toBe(400)

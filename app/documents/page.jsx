@@ -34,6 +34,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/components/ui/toast"
+import { uploadFile } from "@/lib/clientUpload"
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
@@ -93,24 +94,8 @@ export default function DocumentsPage() {
     try {
       const { file } = uploadForm
 
-      // 1. Ask our server to sign an upload (checks type/size, issues a private folder)
-      const signRes = await fetch("/api/uploads/sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, fileSize: file.size }),
-      })
-      const signData = await signRes.json()
-      if (!signRes.ok) throw new Error(signData.error || "Upload not allowed")
-
-      // 2. Send the file straight to Cloudinary
-      const formData = new FormData()
-      Object.entries(signData.fields).forEach(([key, value]) => formData.append(key, value))
-      formData.append("file", file)
-      const uploadRes = await fetch(signData.uploadUrl, { method: "POST", body: formData })
-      const uploaded = await uploadRes.json()
-      if (!uploadRes.ok) throw new Error(uploaded.error?.message || "Upload failed")
-
-      // 3. Record the document; the server verifies the stored file
+      // Upload straight to Cloudinary, then record it; the server verifies the stored file
+      const uploaded = await uploadFile(file, "documents")
       const res = await fetch("/api/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -118,8 +103,7 @@ export default function DocumentsPage() {
           title: uploadForm.title,
           description: uploadForm.description,
           fileName: file.name,
-          publicId: uploaded.public_id,
-          resourceType: uploaded.resource_type,
+          ...uploaded,
         }),
       })
       const data = await res.json()

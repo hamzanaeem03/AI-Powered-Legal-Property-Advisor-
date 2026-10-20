@@ -4,6 +4,7 @@ import { User } from "@/models/User"
 import { withApi, parseQuery } from "@/lib/api"
 import { limitParam, z } from "@/lib/validation"
 import { LAWYER_PUBLIC_SELECT, withRatings } from "@/lib/lawyers"
+import { listedLawyerFilter } from "@/lib/subscription"
 
 // Always query the DB at request time (never prerender at build)
 export const dynamic = "force-dynamic"
@@ -30,7 +31,8 @@ const SORTERS = {
 export const GET = withApi(async (req) => {
   const { q, specialization, location, minRating, sortBy, limit } = parseQuery(req, SearchSchema)
 
-  const searchQuery = { userType: "lawyer", verified: true }
+  // Only verified lawyers with an active subscription are listed
+  const searchQuery = listedLawyerFilter()
   if (q) {
     searchQuery.$or = ["firstName", "lastName", "specialization", "bio"].map((field) => ({
       [field]: { $regex: q, $options: "i" },

@@ -4,6 +4,7 @@ import { Appointment } from "@/models/appointment"
 import { User } from "@/models/User"
 import { withApi, parseBody, requireUser, ApiError } from "@/lib/api"
 import { objectId, z } from "@/lib/validation"
+import { listedLawyerFilter } from "@/lib/subscription"
 
 const AppointmentSchema = z.object({
   lawyerId: objectId,
@@ -19,7 +20,7 @@ export const POST = withApi(async (req) => {
   await connectToDB()
   const [client, lawyer] = await Promise.all([
     User.findById(sessionUser.id),
-    User.exists({ _id: lawyerId, userType: "lawyer", verified: true }),
+    User.exists({ _id: lawyerId, ...listedLawyerFilter() }),
   ])
   if (!client) throw new ApiError(401, "Unauthorized")
   if (!lawyer) throw new ApiError(404, "Lawyer not found")

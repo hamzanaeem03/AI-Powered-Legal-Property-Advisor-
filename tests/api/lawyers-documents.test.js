@@ -23,11 +23,11 @@ import { POST as signUpload } from "@/app/api/uploads/sign/route"
 import { verifyUploadedFile, deleteStoredFile } from "@/lib/storage"
 import { Document } from "@/models/Document"
 import { Review } from "@/models/Review"
-import { createUser, loginAs, request, json, params } from "../helpers"
+import { createUser, createListedLawyer, loginAs, request, json, params } from "../helpers"
 
 describe("public lawyer endpoints", () => {
   it("list only verified lawyers and never leak private fields", async () => {
-    const lawyer = await createUser({ userType: "lawyer", verified: true, email: "secret@example.test" })
+    const lawyer = await createListedLawyer({ email: "secret@example.test" })
     await createUser({ userType: "lawyer", verified: false })
     const client = await createUser()
     await Review.create({ lawyerId: lawyer._id, clientId: client._id, rating: 4 })
@@ -36,13 +36,11 @@ describe("public lawyer endpoints", () => {
     expect(body.lawyers).toHaveLength(1)
     const [l] = body.lawyers
     expect(l).toMatchObject({ avgRating: 4, reviewCount: 1 })
-    for (const field of ["email", "password", "settings"]) expect(l[field]).toBeUndefined()
+    for (const field of ["email", "password", "settings", "subscription"]) expect(l[field]).toBeUndefined()
   })
 
   it("shows the email only when the lawyer opted in", async () => {
-    const lawyer = await createUser({
-      userType: "lawyer",
-      verified: true,
+    const lawyer = await createListedLawyer({
       email: "public@example.test",
       settings: { privacy: { showEmail: true } },
     })
@@ -53,7 +51,7 @@ describe("public lawyer endpoints", () => {
 
   it("400 on malformed id; search treats regex characters literally", async () => {
     expect((await getLawyer(request("/x"), params({ lawyerId: "nope" }))).status).toBe(400)
-    await createUser({ userType: "lawyer", verified: true, firstName: "Imran" })
+    await createListedLawyer({ firstName: "Imran" })
     const res = await json(await searchLawyers(request("/x?q=(a%2B)%2B%24&sortBy=junk&limit=99999")))
     expect(res.status).toBe(200)
     expect(res.body.lawyers).toHaveLength(0)

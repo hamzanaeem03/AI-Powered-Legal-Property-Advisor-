@@ -25,6 +25,16 @@ export async function createUser(overrides = {}) {
   })
 }
 
+/** A verified lawyer with an active subscription, i.e. visible to clients. */
+export async function createListedLawyer(overrides = {}) {
+  return createUser({
+    userType: "lawyer",
+    verified: true,
+    subscription: { onboardingPaid: true, paidUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
+    ...overrides,
+  })
+}
+
 export async function createBooking(client, lawyer, overrides = {}) {
   return Booking.create({
     userId: client._id,

@@ -11,7 +11,8 @@ AI-powered legal consultation platform for property law in Pakistan. Clients get
 - **Documents**: private uploads to Cloudinary, downloadable only by the owner and the people it's shared with, through short-lived links.
 - **Reviews**: clients rate lawyers they have booked.
 - **Email**: welcome, lawyer verification, booking, and review emails over SMTP, respecting each user's notification settings.
-- **Admin dashboard**: platform stats and lawyer verification.
+- **Lawyer subscriptions**: lawyers pay a one-time onboarding fee plus a monthly fee (outside the platform, by bank transfer, JazzCash or Easypaisa) and upload the receipt. Only verified lawyers with an active subscription are listed. Automatic renewal reminders.
+- **Admin dashboard**: platform stats, lawyer verification, payments review, and billing settings.
 - **PWA**: installable, with an offline page.
 
 ## Tech stack
@@ -51,6 +52,7 @@ See [.env.example](.env.example) for the full list with comments.
 | `CLOUDINARY_URL` (or `CLOUDINARY_CLOUD_NAME` / `_API_KEY` / `_API_SECRET`) | For uploads | Document storage |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | For email | Outgoing mail server |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | On Vercel | Shared rate-limit store (the Vercel Upstash integration's `KV_REST_API_*` also work) |
+| `CRON_SECRET` | On Vercel | Authorizes the daily subscription-reminder job (`vercel.json`) |
 
 ## Deploying to Vercel
 
@@ -59,7 +61,20 @@ See [.env.example](.env.example) for the full list with comments.
 3. **Rate limiting:** add the Upstash Redis integration from the Vercel Marketplace. Without it, each serverless instance keeps its own counters and limits are much weaker.
 4. **MongoDB Atlas:** allow connections from Vercel (Network Access → `0.0.0.0/0`, or Vercel's static IPs on paid plans) and use a database user with access to this database only.
 5. **Cloudinary:** files are stored as `authenticated` assets. If PDF downloads fail, enable *Allow delivery of PDF and ZIP files* under Settings → Security.
-6. Deploy. The AI chat route sets `maxDuration = 60` because Gemini can take a while to answer.
+6. Set `CRON_SECRET`. `vercel.json` schedules `/api/cron/subscriptions` daily at 04:00 UTC (09:00 PKT); Vercel sends the secret automatically.
+7. Deploy. The AI chat route sets `maxDuration = 60` because Gemini can take a while to answer.
+8. As admin, open **Billing settings** and set the fees and at least one payment account. Until then lawyers can't submit payments. Existing lawyers are hidden until they pay; use **Payments → Record a payment** (method "Fee waived") to keep someone listed without charging them.
+
+## Lawyer subscriptions
+
+Payments happen outside the platform; the platform records them and controls who is listed.
+
+- **Prices:** the first payment is the onboarding fee plus N months (1, 3, 6 or 12); after that, N × the monthly fee. Prices are set in **Admin → Billing settings** and apply to future payments only.
+- **Paying:** on **Billing**, the lawyer sees where to pay (your bank, JazzCash or Easypaisa accounts), pays from their own app, and uploads the receipt with an optional transaction ID. The payment is accepted immediately and the subscription is extended (renewals stack onto the current period, so paying early loses no days).
+- **Listed** means: verified by an admin **and** onboarding paid **and** subscription not expired. Only listed lawyers appear in search, profiles and booking. Existing bookings are not affected when a subscription ends.
+- **Review:** **Admin → Payments** shows every payment and receipt. Rejecting one (with a reason the lawyer sees) recalculates the subscription without it; it can be restored. Admins can also record cash payments or waive fees.
+- **Reminders:** a daily job notifies lawyers (in-app and email) a configurable number of days before expiry, and once when it expires.
+- **Revenue** on the admin dashboard is the sum of accepted subscription payments.
 
 ## Scripts
 
@@ -116,7 +131,9 @@ All endpoints are under `/api` and return JSON. Errors have the form `{ "success
 | Cases | `GET/POST /cases`, `GET /caseoflawyer` |
 | Documents | `POST /uploads/sign`, `GET/POST /documents`, `DELETE /documents/[id]`, `GET /documents/[id]/download` |
 | Other | `GET/POST /reviews`, `GET/POST /notifications`, `GET /client/sessions`, `GET /analytics` |
-| Admin | `GET /admin/stats`, `POST /admin/verify-lawyer` |
+| Billing (lawyer) | `GET /billing`, `POST /billing/payments`, `GET /billing/payments/[id]/receipt` |
+| Admin | `GET /admin/stats`, `POST /admin/verify-lawyer`, `GET/PUT /admin/settings`, `GET/POST /admin/payments`, `PATCH /admin/payments/[id]`, `GET /admin/lawyers` |
+| Cron | `GET /cron/subscriptions` (requires `CRON_SECRET`) |
 
 ## Known limitations
 
@@ -125,4 +142,5 @@ All endpoints are under `/api` and return JSON. Errors have the form `{ "success
 - **Password reset:** not implemented.
 - **Sessions** can't be revoked before they expire (for example after a password change).
 - **PWA icons** referenced by `manifest.json` (`public/icons/`) don't exist yet.
-- **Payments** aren't implemented; admin "revenue" figures assume a flat $50 per booking.
+- **Client–lawyer fees** are arranged directly between them; the platform doesn't track them. Lawyers' `sessionRate` is only displayed.
+- **Receipts aren't checked automatically**: a lawyer is listed as soon as they upload one, so review new payments in **Admin → Payments**.

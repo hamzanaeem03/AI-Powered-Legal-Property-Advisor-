@@ -12,6 +12,14 @@ const UserSchema = new mongoose.Schema({
   bio:       { type: String },
   verified:  { type: Boolean, default: false },
   sessionRate: { type: Number, default: 50 },
+  // Lawyers only: platform subscription (see lib/subscription.js)
+  subscription: {
+    onboardingPaid: { type: Boolean, default: false },
+    paidUntil: { type: Date, default: null },
+    // Which paidUntil we last sent a reminder / expiry notice about (avoids repeats)
+    reminderSentFor: { type: Date, default: null },
+    expiryNoticeFor: { type: Date, default: null },
+  },
   availableSlots: {
     type: Map,
     of: [String],
@@ -44,6 +52,6 @@ const UserSchema = new mongoose.Schema({
   }
 }, { timestamps: true })
 
-UserSchema.index({ userType: 1, verified: 1 })
+UserSchema.index({ userType: 1, verified: 1, "subscription.paidUntil": 1 })
 
 export const User = mongoose.models.User || mongoose.model("User", UserSchema)

@@ -7,6 +7,7 @@ import { emailService } from "@/lib/email"
 import { withApi, parseBody, requireUser, ApiError } from "@/lib/api"
 import { objectId, z } from "@/lib/validation"
 import { enforceRateLimit, LIMITS } from "@/lib/rateLimit"
+import { isListed } from "@/lib/subscription"
 
 const BookingSchema = z.object({ lawyerId: objectId })
 const ACCESS_HOURS = 48
@@ -21,6 +22,7 @@ export const POST = withApi(async (req) => {
   if (!client) throw new ApiError(401, "Unauthorized")
   if (!lawyer || lawyer.userType !== "lawyer") throw new ApiError(404, "Lawyer not found")
   if (!lawyer.verified) throw new ApiError(400, "This lawyer is not yet verified")
+  if (!isListed(lawyer)) throw new ApiError(400, "This lawyer is not currently accepting bookings")
 
   const existingBooking = await Booking.findOne({
     userId: client._id,
