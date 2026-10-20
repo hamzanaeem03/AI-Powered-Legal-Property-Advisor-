@@ -11,13 +11,15 @@ import {
   UserCheck,
   FileText,
   DollarSign,
-  TrendingUp,
   AlertTriangle,
   CheckCircle,
   Loader2,
   Star,
   MessageCircle,
+  CreditCard,
+  Settings,
 } from "lucide-react"
+import Link from "next/link"
 import { useToast } from "@/components/ui/toast"
 
 const fadeInUp = {
@@ -104,34 +106,36 @@ export default function AdminDashboard() {
     )
   }
 
+  const formatPKR = (amount) => `PKR ${Number(amount || 0).toLocaleString("en-PK")}`
+
   const overviewStats = [
     {
       title: "Total Users",
       value: stats.overview.totalUsers,
       icon: Users,
       color: "text-blue-600",
-      change: "+12%",
+      detail: `${stats.overview.totalClients} clients`,
     },
     {
-      title: "Verified Lawyers",
-      value: stats.overview.totalLawyers,
+      title: "Listed Lawyers",
+      value: stats.overview.listedLawyers,
       icon: UserCheck,
       color: "text-green-600",
-      change: "+8%",
+      detail: `${stats.overview.totalLawyers} lawyer accounts`,
     },
     {
       title: "Total Bookings",
       value: stats.overview.totalBookings,
       icon: FileText,
       color: "text-purple-600",
-      change: "+15%",
+      detail: `${stats.overview.monthlyBookings} this month`,
     },
     {
-      title: "Total Revenue",
-      value: `$${stats.overview.totalRevenue.toLocaleString()}`,
+      title: "Subscription Revenue",
+      value: formatPKR(stats.overview.totalRevenue),
       icon: DollarSign,
       color: "text-yellow-600",
-      change: "+23%",
+      detail: `${formatPKR(stats.overview.monthlyRevenue)} this month`,
     },
   ]
 
@@ -145,9 +149,23 @@ export default function AdminDashboard() {
             </div>
             <span className="text-xl font-bold">Admin Dashboard</span>
           </div>
-          <form action="/auth/logout" method="POST">
-            <Button variant="ghost" size="sm">Logout</Button>
-          </form>
+          <div className="flex items-center space-x-2">
+            <Link href="/admin/payments">
+              <Button variant="outline" size="sm">
+                <CreditCard className="h-4 w-4 mr-2" />
+                Payments
+              </Button>
+            </Link>
+            <Link href="/admin/settings">
+              <Button variant="outline" size="sm">
+                <Settings className="h-4 w-4 mr-2" />
+                Billing settings
+              </Button>
+            </Link>
+            <form action="/auth/logout" method="POST">
+              <Button variant="ghost" size="sm">Logout</Button>
+            </form>
+          </div>
         </div>
       </nav>
 
@@ -171,10 +189,7 @@ export default function AdminDashboard() {
                     <div>
                       <p className="text-sm font-medium text-gray-600">{stat.title}</p>
                       <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                      <div className="flex items-center space-x-1 mt-1">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-600">{stat.change}</span>
-                      </div>
+                      <p className="text-sm text-gray-500 mt-1">{stat.detail}</p>
                     </div>
                     <stat.icon className={`h-8 w-8 ${stat.color}`} />
                   </div>

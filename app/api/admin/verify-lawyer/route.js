@@ -1,54 +1,41 @@
 import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import { getAuthUser } from "@/lib/getAuthUser"
+import { emailService } from "@/lib/email"
+import { withApi, parseBody, requireUser, ApiError } from "@/lib/api"
+import { objectId, text, z } from "@/lib/validation"
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    const admin = await getAuthUser()
-    
-    if (!admin || admin.userType !== "admin") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+const VerifySchema = z.object({
+  lawyerId: objectId,
+  action: z.enum(["approve", "reject"], { errorMap: () => ({ message: "Invalid action" }) }),
+  reason: text(500).optional(),
+})
 
-    const body = await req.json()
-    const { lawyerId, action } = body
+export const POST = withApi(async (req) => {
+  await requireUser(["admin"])
+  const { lawyerId, action, reason } = await parseBody(req, VerifySchema)
 
-    if (!lawyerId || !action) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
+  await connectToDB()
+  const lawyer = await User.findById(lawyerId)
+  if (!lawyer || lawyer.userType !== "lawyer") throw new ApiError(404, "Lawyer not found")
 
-    if (!["approve", "reject"].includes(action)) {
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 })
-    }
-
-    const lawyer = await User.findById(lawyerId)
-    if (!lawyer || lawyer.userType !== "lawyer") {
-      return NextResponse.json({ error: "Lawyer not found" }, { status: 404 })
-    }
-
-    if (action === "approve") {
-      lawyer.verified = true
-      await lawyer.save()
-      
-      return NextResponse.json({ 
-        success: true, 
-        message: "Lawyer verified successfully" 
-      })
-    } else {
-      // For reject, we could either delete the account or mark as rejected
-      // For now, we'll just delete the account
-      await User.findByIdAndDelete(lawyerId)
-      
-      return NextResponse.json({ 
-        success: true, 
-        message: "Lawyer account rejected and removed" 
-      })
-    }
-
-  } catch (err) {
-    console.error("Error in lawyer verification:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+  if (action === "approve") {
+    lawyer.verified = true
+    await lawyer.save()
+  } else {
+    // Rejected applications are removed
+    await User.findByIdAndDelete(lawyerId)
   }
-} 
+
+  try {
+    if (action === "approve") await emailService.sendLawyerVerificationApproved(lawyer)
+    else await emailService.sendLawyerVerificationRejected(lawyer, reason)
+  } catch (emailError) {
+    console.error("Failed to send verification email:", emailError)
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: action === "approve" ? "Lawyer verified successfully" : "Lawyer account rejected and removed",
+  })
+})

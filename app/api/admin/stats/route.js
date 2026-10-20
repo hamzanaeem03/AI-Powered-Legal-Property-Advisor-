@@ -4,7 +4,16 @@ import { User } from "@/models/User"
 import { Booking } from "@/models/Booking"
 import { Case } from "@/models/Case"
 import { Review } from "@/models/Review"
+import { Payment } from "@/models/Payment"
 import { getAuthUser } from "@/lib/getAuthUser"
+import { listedLawyerFilter } from "@/lib/subscription"
+
+// Sum of accepted lawyer subscription payments since `since` (all time if omitted)
+async function revenueSince(since) {
+  const match = { status: "accepted", ...(since ? { createdAt: { $gte: since } } : {}) }
+  const [row] = await Payment.aggregate([{ $match: match }, { $group: { _id: null, total: { $sum: "$amount" } } }])
+  return row?.total || 0
+}
 
 export const dynamic = "force-dynamic"
 
@@ -43,8 +52,9 @@ export async function GET() {
       .limit(5)
       .populate("userId", "firstName lastName email")
 
-    // Calculate revenue (assuming each booking is $50)
-    const totalRevenue = totalBookings * 50
+    // Revenue = lawyer subscription payments recorded on the platform
+    const totalRevenue = await revenueSince()
+    const listedLawyers = await User.countDocuments(listedLawyerFilter())
 
     // Get monthly stats
     const now = new Date()
@@ -52,7 +62,12 @@ export async function GET() {
     const monthlyBookings = await Booking.countDocuments({
       createdAt: { $gte: startOfMonth }
     })
-    const monthlyRevenue = monthlyBookings * 50
+    const monthlyRevenue = await revenueSince(startOfMonth)
+
+    const recentPayments = await Payment.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("lawyerId", "firstName lastName")
 
     const stats = {
       overview: {
@@ -63,7 +78,10 @@ export async function GET() {
         totalCases,
         totalReviews,
         totalRevenue,
-        monthlyRevenue
+        monthlyRevenue,
+        monthlyBookings,
+        listedLawyers,
+        currency: "PKR"
       },
       pendingApprovals: pendingLawyers.map(lawyer => ({
         id: lawyer._id,
@@ -75,11 +93,19 @@ export async function GET() {
       recentActivity: [
         ...recentBookings.map(booking => ({
           id: booking._id,
-          type: "payment",
+          type: "booking",
           user: `${booking.userId?.firstName} ${booking.userId?.lastName}`,
           action: `Booked session with ${booking.lawyerId?.firstName} ${booking.lawyerId?.lastName}`,
           time: new Date(booking.createdAt).toLocaleString(),
           status: "success"
+        })),
+        ...recentPayments.map(payment => ({
+          id: payment._id,
+          type: "payment",
+          user: `${payment.lawyerId?.firstName} ${payment.lawyerId?.lastName}`,
+          action: `${payment.status === "rejected" ? "Rejected payment" : "Paid"} PKR ${payment.amount.toLocaleString("en-PK")} (${payment.kind === "initial" ? "onboarding" : "renewal"})`,
+          time: new Date(payment.createdAt).toLocaleString(),
+          status: payment.status === "rejected" ? "info" : "success"
         })),
         ...recentCases.map(case_ => ({
           id: case_._id,

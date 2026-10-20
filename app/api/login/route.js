@@ -1,50 +1,36 @@
-
+import { NextResponse } from "next/server"
+import bcrypt from "bcryptjs"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
-import { cookies } from "next/headers"
+import { withApi, parseBody, ApiError } from "@/lib/api"
+import { email, z } from "@/lib/validation"
+import { enforceRateLimit, clientIp, LIMITS } from "@/lib/rateLimit"
+import { signSessionToken, setSessionCookie, publicUser, EMAIL_COLLATION } from "@/lib/auth"
 
-export async function POST(req) {
-  try {
-    const body = await req.json()
-    const { email, password } = body
+const LoginSchema = z.object({
+  email,
+  password: z.string().min(1, "Password is required").max(128),
+})
 
-    if (!email || !password) {
-      return Response.json({ message: "Email and password are required" }, { status: 400 })
-    }
+// Compared against when the email is unknown, so both paths take the same time
+const DUMMY_HASH = "$2a$12$CwTycUXWue0Thq9StjUM0uJ8.pAjhXJ9Tf1G1n1x8m8cOw3ZfZ6aK"
 
-    await connectToDB()
-    const user = await User.findOne({ email })
+export const POST = withApi(async (req) => {
+  const ip = clientIp(req)
+  await enforceRateLimit(`login:ip:${ip}`, LIMITS.loginPerIp, "Too many login attempts. Please try again later.")
 
-    // Same response for unknown email and wrong password, so emails can't be enumerated
-    const isMatch = user ? await bcrypt.compare(password, user.password) : false
-    if (!isMatch) {
-      return Response.json({ message: "Invalid email or password" }, { status: 401 })
-    }
+  const { email: loginEmail, password } = await parseBody(req, LoginSchema)
+  await enforceRateLimit(`login:account:${loginEmail}`, LIMITS.loginPerAccount, "Too many login attempts. Please try again later.")
 
-    const token = jwt.sign(
-      { id: user._id, firstName: user.firstName, userType: user.userType },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    )
+  await connectToDB()
+  const user = await User.findOne({ email: loginEmail }).collation(EMAIL_COLLATION)
 
-    const cookieStore = await cookies()
-    cookieStore.set("token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-    maxAge: 7 * 24 * 60 * 60,
-    path: "/",
-    })
-
-    return Response.json({ message: "Login successful", user: {
-      id: user._id,
-      firstName: user.firstName,
-      userType: user.userType,
-    }})
-  } catch (err) {
-    console.error(err)
-    return Response.json({ message: "Server error" }, { status: 500 })
+  // Same response for unknown email and wrong password, so emails can't be enumerated
+  const isMatch = await bcrypt.compare(password, user?.password || DUMMY_HASH)
+  if (!user || !isMatch) {
+    throw new ApiError(401, "Invalid email or password")
   }
-}
+
+  const response = NextResponse.json({ message: "Login successful", user: publicUser(user) })
+  return setSessionCookie(response, signSessionToken(user))
+})

@@ -1,79 +1,47 @@
 import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { Notification } from "@/models/Notification"
-import { getAuthUser } from "@/lib/getAuthUser"
+import { withApi, parseBody, parseQuery, requireUser } from "@/lib/api"
+import { objectId, limitParam, z } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req) {
-  try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+const ListSchema = z.object({
+  limit: limitParam(20, 100),
+  unread: z.enum(["true", "false"]).optional(),
+})
 
-    const { searchParams } = new URL(req.url)
-    const limit = parseInt(searchParams.get("limit")) || 20
-    const unreadOnly = searchParams.get("unread") === "true"
+const UpdateSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("mark-read"), notificationId: objectId }),
+  z.object({ action: z.literal("mark-all-read") }),
+], { errorMap: () => ({ message: "Invalid action" }) })
 
-    const query = { userId: user.id }
-    if (unreadOnly) {
-      query.read = false
-    }
+export const GET = withApi(async (req) => {
+  const user = await requireUser()
+  const { limit, unread } = parseQuery(req, ListSchema)
+  await connectToDB()
 
-    const notifications = await Notification.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
+  const query = { userId: user.id }
+  if (unread === "true") query.read = false
 
-    const unreadCount = await Notification.countDocuments({
-      userId: user.id,
-      read: false
-    })
+  const [notifications, unreadCount] = await Promise.all([
+    Notification.find(query).sort({ createdAt: -1 }).limit(limit),
+    Notification.countDocuments({ userId: user.id, read: false }),
+  ])
 
-    return NextResponse.json({
-      success: true,
-      notifications,
-      unreadCount
-    })
-  } catch (err) {
-    console.error("Error fetching notifications:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+  return NextResponse.json({ success: true, notifications, unreadCount })
+})
+
+export const POST = withApi(async (req) => {
+  const user = await requireUser()
+  const body = await parseBody(req, UpdateSchema)
+  await connectToDB()
+
+  if (body.action === "mark-read") {
+    await Notification.updateOne({ _id: body.notificationId, userId: user.id }, { read: true })
+  } else {
+    await Notification.updateMany({ userId: user.id, read: false }, { read: true })
   }
-}
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const body = await req.json()
-    const { action, notificationId } = body
-
-    if (action === "mark-read" && notificationId) {
-      // Mark specific notification as read
-      await Notification.findOneAndUpdate(
-        { _id: notificationId, userId: user.id },
-        { read: true }
-      )
-    } else if (action === "mark-all-read") {
-      // Mark all notifications as read
-      await Notification.updateMany(
-        { userId: user.id, read: false },
-        { read: true }
-      )
-    } else {
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 })
-    }
-
-    return NextResponse.json({ success: true })
-  } catch (err) {
-    console.error("Error updating notifications:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
-  }
-} 
+  return NextResponse.json({ success: true })
+})

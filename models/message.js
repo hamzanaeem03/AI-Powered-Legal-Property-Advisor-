@@ -31,4 +31,6 @@ const MessageSchema = new mongoose.Schema({
   },
 })
 
+MessageSchema.index({ bookingId: 1, timestamp: 1 })
+
 export const Message = mongoose.models.Message || mongoose.model("Message", MessageSchema)

@@ -1,54 +1,32 @@
-import { getAuthUser } from "@/lib/getAuthUser"
+import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { Message } from "@/models/message"
-import { Booking } from "@/models/Booking"
+import { withApi, parseBody, requireUser } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
+import { enforceRateLimit, LIMITS } from "@/lib/rateLimit"
+import { requireActiveBookingParticipant } from "@/lib/bookingAccess"
 
-export async function POST(req) {
+const SendSchema = z.object({
+  bookingId: objectId,
+  content: z.string().trim().min(1, "Message cannot be empty").max(5000, "Message is too long"),
+})
+
+export const POST = withApi(async (req) => {
+  const user = await requireUser()
+  await enforceRateLimit(`chat-send:${user.id}`, LIMITS.sendMessage, "You're sending messages too quickly.")
+  const { bookingId, content } = await parseBody(req, SendSchema)
+
   await connectToDB()
-
-  const user = await getAuthUser(req)
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const body = await req.json()
-  const { bookingId, content } = body
-
-  if (!bookingId || !content) {
-    return Response.json({ error: "Missing bookingId or content" }, { status: 400 })
-  }
-
-  const booking = await Booking.findById(bookingId)
-
-  if (!booking) {
-    return Response.json({ error: "Booking not found" }, { status: 404 })
-  }
-
-  if (booking.accessStatus !== "enabled") {
-    return Response.json({ error: "Access disabled" }, { status: 403 })
-  }
-
-  if (new Date() > new Date(booking.expiresAt)) {
-    return Response.json({ error: "Booking expired" }, { status: 403 })
-  }
-
-  if (
-    booking.userId.toString() !== user.id &&
-    booking.lawyerId.toString() !== user.id
-  ) {
-    return Response.json({ error: "Unauthorized user" }, { status: 403 })
-  }
-
-  const senderType = booking.lawyerId.toString() === user.id ? "lawyer" : "client"
+  const { role } = await requireActiveBookingParticipant(bookingId, user.id)
 
   const message = await Message.create({
     bookingId,
     senderId: user.id,
-    senderType, // ✅ added field
+    senderType: role,
     content,
     timestamp: new Date(),
     status: "sent",
   })
 
-  return Response.json({ success: true, message })
-}
+  return NextResponse.json({ success: true, message })
+})

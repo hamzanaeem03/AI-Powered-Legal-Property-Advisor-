@@ -10,4 +10,6 @@ const AppointmentSchema = new mongoose.Schema({
   paid: { type: Boolean, default: false },
 });
 
+AppointmentSchema.index({ lawyerId: 1, date: 1 });
+
 export const Appointment = mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);

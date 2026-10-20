@@ -34,6 +34,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/components/ui/toast"
+import { uploadFile } from "@/lib/clientUpload"
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
@@ -91,41 +92,54 @@ export default function DocumentsPage() {
 
     setUploading(true)
     try {
-      // In a real app, you'd upload to a cloud service like AWS S3
-      // For now, we'll simulate the upload
-      const fileUrl = URL.createObjectURL(uploadForm.file)
-      
-      const documentData = {
-        title: uploadForm.title,
-        description: uploadForm.description,
-        fileName: uploadForm.file.name,
-        fileUrl: fileUrl,
-        fileSize: uploadForm.file.size,
-        fileType: uploadForm.file.name.split('.').pop()
-      }
+      const { file } = uploadForm
 
+      // Upload straight to Cloudinary, then record it; the server verifies the stored file
+      const uploaded = await uploadFile(file, "documents")
       const res = await fetch("/api/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(documentData),
+        body: JSON.stringify({
+          title: uploadForm.title,
+          description: uploadForm.description,
+          fileName: file.name,
+          ...uploaded,
+        }),
       })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Failed to save document")
 
-      if (res.ok) {
-        const data = await res.json()
-        setDocuments(prev => [data.document, ...prev])
-        setUploadForm({ title: "", description: "", file: null })
-        addToast("Document uploaded successfully!", "success")
-        // Close dialog by refreshing
-        window.location.reload()
-      } else {
-        const error = await res.json()
-        addToast(error.error || "Failed to upload document", "error")
-      }
+      setDocuments(prev => [data.document, ...prev])
+      setUploadForm({ title: "", description: "", file: null })
+      addToast("Document uploaded successfully!", "success")
+      // Close dialog by refreshing
+      window.location.reload()
     } catch (err) {
       console.error("Failed to upload document:", err)
-      addToast("Failed to upload document", "error")
+      addToast(err.message || "Failed to upload document", "error")
     } finally {
       setUploading(false)
+    }
+  }
+
+  const openDocument = (doc, { inline }) => {
+    if (doc.available === false) {
+      addToast("This file was uploaded before storage was set up. Please upload it again.", "error")
+      return
+    }
+    window.open(`${doc.fileUrl}${inline ? "?inline=1" : ""}`, "_blank", "noopener,noreferrer")
+  }
+
+  const handleDelete = async (doc) => {
+    if (!window.confirm(`Delete "${doc.title}"? This cannot be undone.`)) return
+    try {
+      const res = await fetch(`/api/documents/${doc._id}`, { method: "DELETE" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Failed to delete document")
+      setDocuments(prev => prev.filter(d => d._id !== doc._id))
+      addToast("Document deleted", "success")
+    } catch (err) {
+      addToast(err.message || "Failed to delete document", "error")
     }
   }
 
@@ -392,19 +406,25 @@ export default function DocumentsPage() {
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Button size="sm" variant="outline">
+                            <Button size="sm" variant="outline" onClick={() => openDocument(doc, { inline: true })}>
                               <Eye className="h-4 w-4 mr-2" />
                               View
                             </Button>
-                            <Button size="sm" variant="outline">
+                            <Button size="sm" variant="outline" onClick={() => openDocument(doc, { inline: false })}>
                               <Download className="h-4 w-4 mr-2" />
                               Download
                             </Button>
-                            <Button size="sm" variant="outline">
+                            <Button size="sm" variant="outline" disabled title="Sharing is coming soon">
                               <Share2 className="h-4 w-4 mr-2" />
                               Share
                             </Button>
-                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => handleDelete(doc)}
+                              aria-label={`Delete ${doc.title}`}
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -437,7 +457,7 @@ export default function DocumentsPage() {
                               <div className="flex items-center space-x-2 mb-1">
                                 <h3 className="font-semibold text-lg">{doc.title}</h3>
                                 <Badge variant="secondary" className="text-xs">
-                                  Shared by {doc.uploadedBy.firstName} {doc.uploadedBy.lastName}
+                                  Shared by {doc.uploadedBy ? `${doc.uploadedBy.firstName} ${doc.uploadedBy.lastName}` : "a former user"}
                                 </Badge>
                               </div>
                               {doc.description && (
@@ -453,11 +473,11 @@ export default function DocumentsPage() {
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Button size="sm" variant="outline">
+                            <Button size="sm" variant="outline" onClick={() => openDocument(doc, { inline: true })}>
                               <Eye className="h-4 w-4 mr-2" />
                               View
                             </Button>
-                            <Button size="sm" variant="outline">
+                            <Button size="sm" variant="outline" onClick={() => openDocument(doc, { inline: false })}>
                               <Download className="h-4 w-4 mr-2" />
                               Download
                             </Button>

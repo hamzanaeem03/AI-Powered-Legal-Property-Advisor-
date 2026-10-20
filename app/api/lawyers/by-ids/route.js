@@ -1,26 +1,19 @@
 // app/api/lawyers/by-ids/route.js
-
+import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import { NextResponse } from "next/server"
+import { withApi, parseBody, requireUser } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    const { ids } = await req.json()
+const ByIdsSchema = z.object({
+  ids: z.array(objectId).min(1, "No IDs provided").max(100),
+})
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return NextResponse.json({ error: "No IDs provided" }, { status: 400 })
-    }
+export const POST = withApi(async (req) => {
+  await requireUser()
+  const { ids } = await parseBody(req, ByIdsSchema)
 
-    const lawyers = await User.find({
-      _id: { $in: ids },
-      userType: "lawyer",
-    }).select("firstName lastName email image _id userType")
-
-    return NextResponse.json({ lawyers })
-  } catch (err) {
-    console.error("Error in /api/lawyers/by-ids:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
-  }
-}
+  await connectToDB()
+  const lawyers = await User.find({ _id: { $in: ids }, userType: "lawyer" }).select("firstName lastName image _id userType")
+  return NextResponse.json({ lawyers })
+})

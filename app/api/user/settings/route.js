@@ -1,120 +1,83 @@
 import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import { getAuthUser } from "@/lib/getAuthUser"
+import { withApi, parseBody, requireUser, ApiError } from "@/lib/api"
+import { z } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
-export async function GET() {
+const DEFAULT_SETTINGS = {
+  notifications: { email: true, push: true, booking: true, messages: true, reviews: true, system: false },
+  privacy: { profileVisibility: "public", showEmail: false, showPhone: false, allowMessages: true },
+  preferences: { language: "en", timezone: "UTC", currency: "USD" },
+}
+
+const isValidTimeZone = (tz) => {
   try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const userDoc = await User.findById(user.id).select("settings")
-    
-    // Return default settings if none exist
-    const defaultSettings = {
-      notifications: {
-        email: true,
-        push: true,
-        booking: true,
-        messages: true,
-        reviews: true,
-        system: false
-      },
-      privacy: {
-        profileVisibility: "public",
-        showEmail: false,
-        showPhone: false,
-        allowMessages: true
-      },
-      preferences: {
-        language: "en",
-        timezone: "UTC",
-        currency: "USD"
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      settings: userDoc.settings || defaultSettings
-    })
-  } catch (err) {
-    console.error("Error fetching user settings:", err)
-    return NextResponse.json({ error: "Failed to fetch settings" }, { status: 500 })
+    new Intl.DateTimeFormat("en-US", { timeZone: tz })
+    return true
+  } catch {
+    return false
   }
 }
 
-export async function PUT(req) {
-  try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const body = await req.json()
-    const { notifications, privacy, preferences } = body
-
-    // Validate settings structure
-    const updateData = {}
-    
-    if (notifications && typeof notifications === "object") {
-      updateData["settings.notifications"] = {
-        email: Boolean(notifications.email),
-        push: Boolean(notifications.push),
-        booking: Boolean(notifications.booking),
-        messages: Boolean(notifications.messages),
-        reviews: Boolean(notifications.reviews),
-        system: Boolean(notifications.system)
-      }
-    }
-
-    if (privacy && typeof privacy === "object") {
-      updateData["settings.privacy"] = {
-        profileVisibility: ["public", "lawyers", "private"].includes(privacy.profileVisibility) 
-          ? privacy.profileVisibility 
-          : "public",
-        showEmail: Boolean(privacy.showEmail),
-        showPhone: Boolean(privacy.showPhone),
-        allowMessages: Boolean(privacy.allowMessages)
-      }
-    }
-
-    if (preferences && typeof preferences === "object") {
-      updateData["settings.preferences"] = {
-        language: ["en", "ur"].includes(preferences.language) ? preferences.language : "en",
-        timezone: preferences.timezone || "UTC",
-        currency: ["USD", "PKR"].includes(preferences.currency) ? preferences.currency : "USD"
-      }
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json({ error: "No valid settings to update" }, { status: 400 })
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      user.id,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    ).select("settings")
-
-    if (!updatedUser) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      settings: updatedUser.settings,
-      message: "Settings updated successfully"
+const SettingsSchema = z.object({
+  notifications: z
+    .object({
+      email: z.boolean(),
+      push: z.boolean(),
+      booking: z.boolean(),
+      messages: z.boolean(),
+      reviews: z.boolean(),
+      system: z.boolean(),
     })
-  } catch (err) {
-    console.error("Error updating user settings:", err)
-    return NextResponse.json({ error: "Failed to update settings" }, { status: 500 })
+    .partial()
+    .optional(),
+  privacy: z
+    .object({
+      profileVisibility: z.enum(["public", "lawyers", "private"]),
+      showEmail: z.boolean(),
+      showPhone: z.boolean(),
+      allowMessages: z.boolean(),
+    })
+    .partial()
+    .optional(),
+  preferences: z
+    .object({
+      language: z.enum(["en", "ur"]),
+      timezone: z.string().max(64).refine(isValidTimeZone, "Unknown time zone"),
+      currency: z.enum(["USD", "PKR"]),
+    })
+    .partial()
+    .optional(),
+})
+
+export const GET = withApi(async () => {
+  const user = await requireUser()
+  await connectToDB()
+  const userDoc = await User.findById(user.id).select("settings")
+  if (!userDoc) throw new ApiError(404, "User not found")
+  return NextResponse.json({ success: true, settings: userDoc.settings || DEFAULT_SETTINGS })
+})
+
+export const PUT = withApi(async (req) => {
+  const user = await requireUser()
+  const body = await parseBody(req, SettingsSchema)
+
+  // Update only the fields that were sent, leaving the rest untouched
+  const updateData = {}
+  for (const [section, values] of Object.entries(body)) {
+    for (const [key, value] of Object.entries(values || {})) {
+      updateData[`settings.${section}.${key}`] = value
+    }
   }
-} 
+  if (Object.keys(updateData).length === 0) {
+    throw new ApiError(400, "No valid settings to update")
+  }
+
+  await connectToDB()
+  const updatedUser = await User.findByIdAndUpdate(user.id, { $set: updateData }, { new: true, runValidators: true }).select("settings")
+  if (!updatedUser) throw new ApiError(404, "User not found")
+
+  return NextResponse.json({ success: true, settings: updatedUser.settings, message: "Settings updated successfully" })
+})

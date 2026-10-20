@@ -19,10 +19,11 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url)
     const type = searchParams.get("type") || "overview"
-    const period = searchParams.get("period") || "30" // days
+    // Days, clamped to 1..365 (non-numeric input falls back to 30)
+    const period = Math.min(Math.max(parseInt(searchParams.get("period"), 10) || 30, 1), 365)
 
     const now = new Date()
-    const startDate = new Date(now.getTime() - parseInt(period) * 24 * 60 * 60 * 1000)
+    const startDate = new Date(now.getTime() - period * 24 * 60 * 60 * 1000)
 
     let analytics = {}
 

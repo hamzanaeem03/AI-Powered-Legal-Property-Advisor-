@@ -10,6 +10,7 @@ import { Scale, Eye, EyeOff } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { ROLE_HOME, safeNextPath } from "@/lib/routes"
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
@@ -30,9 +31,10 @@ export default function LoginPage() {
 
       if (res.ok) {
         const { userType } = data.user
-        if (userType === "admin") router.push("/admin/dashboard")
-        else if (userType === "lawyer") router.push("/lawyer/dashboard")
-        else router.push("/client/dashboard")
+        // Return to the page that sent the user to login, if it's a safe local path
+        const next = safeNextPath(new URLSearchParams(window.location.search).get("next"))
+        router.push(next || ROLE_HOME[userType] || "/client/dashboard")
+        router.refresh()
       } else {
         alert(data.message || "Login failed")
       }

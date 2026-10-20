@@ -1,39 +1,20 @@
-import {getAuthUser} from "@/lib/getAuthUser"
+import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { Message } from "@/models/message"
-import { Booking } from "@/models/Booking"
+import { withApi, parseBody, requireUser } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
+import { requireActiveBookingParticipant } from "@/lib/bookingAccess"
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    console.log("✅ Connected to DB")
+const MessagesSchema = z.object({ bookingId: objectId })
 
-    const user = await getAuthUser(req)
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
-    }
+export const POST = withApi(async (req) => {
+  const user = await requireUser()
+  const { bookingId } = await parseBody(req, MessagesSchema)
 
-    const { bookingId } = await req.json()
-    if (!bookingId) {
-      return new Response(JSON.stringify({ error: "Booking ID missing" }), { status: 400 })
-    }
+  await connectToDB()
+  await requireActiveBookingParticipant(bookingId, user.id)
 
-    const booking = await Booking.findById(bookingId)
-
-    if (
-      !booking ||
-      booking.accessStatus !== "enabled" ||
-      new Date() > new Date(booking.expiresAt) ||
-      (booking.userId.toString() !== user.id && booking.lawyerId.toString() !== user.id)
-    ) {
-      return new Response(JSON.stringify({ error: "Access denied" }), { status: 403 })
-    }
-
-    const messages = await Message.find({ bookingId }).sort({ timestamp: 1 })
-
-    return new Response(JSON.stringify({ messages }), { status: 200 })
-  } catch (err) {
-    console.error("❌ Internal server error in /api/chat/messages:", err)
-    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500 })
-  }
-}
+  // Cap the history returned on each poll
+  const messages = await Message.find({ bookingId }).sort({ timestamp: -1 }).limit(500)
+  return NextResponse.json({ messages: messages.reverse() })
+})

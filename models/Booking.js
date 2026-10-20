@@ -32,6 +32,10 @@ const BookingSchema = new mongoose.Schema({
   },
 })
 
+// Active-booking lookups and the lawyer dashboard
+BookingSchema.index({ userId: 1, lawyerId: 1, expiresAt: -1 })
+BookingSchema.index({ lawyerId: 1, createdAt: -1 })
+
 const Booking = mongoose.models.Booking || mongoose.model("Booking", BookingSchema)
 
 export { Booking }

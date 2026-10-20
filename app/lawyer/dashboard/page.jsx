@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { MessageCircle, Video, Calendar, FileText, Star, Users, DollarSign, TrendingUp, Loader2, User, Settings } from "lucide-react";
+import { MessageCircle, Video, Calendar, FileText, Star, Users, DollarSign, TrendingUp, Loader2, User, Settings, CreditCard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import NotificationBell from "@/components/NotificationBell";
@@ -29,6 +29,7 @@ export default function LawyerDashboard() {
   const [bookings, setBookings] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [user, setUser] = useState(null);
+  const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -43,6 +44,12 @@ export default function LawyerDashboard() {
       }
     };
     fetchUser();
+
+    // Listing status drives the billing banner
+    fetch("/api/billing")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setSubscription(data.subscription))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -104,6 +111,12 @@ export default function LawyerDashboard() {
           </div>
           <div className="flex items-center space-x-4">
             <NotificationBell />
+            <Link href="/lawyer/billing">
+              <Button variant="outline" size="sm">
+                <CreditCard className="h-4 w-4 mr-2" />
+                Billing
+              </Button>
+            </Link>
             <Link href="/profile">
               <Button variant="outline" size="sm">
                 <User className="h-4 w-4 mr-2" />
@@ -130,7 +143,23 @@ export default function LawyerDashboard() {
           </h1>
           {!user?.verified && (
             <div className="bg-yellow-100 text-yellow-800 p-4 rounded mb-4">
-              Your account is pending admin verification. Some features may be restricted.
+              Your account is pending admin verification. Clients can&apos;t find you until it&apos;s approved.
+            </div>
+          )}
+          {subscription && !subscription.listed && subscription.blockers.some((b) => b !== "awaiting_verification") && (
+            <div className="bg-red-50 text-red-800 p-4 rounded mb-4 flex items-center justify-between gap-4">
+              <span>
+                {subscription.onboardingPaid
+                  ? "Your subscription has ended, so clients can't find or book you."
+                  : "Pay your onboarding fee to be listed for clients."}
+              </span>
+              <Link href="/lawyer/billing"><Button size="sm">Go to billing</Button></Link>
+            </div>
+          )}
+          {subscription?.listed && subscription.daysLeft <= 7 && (
+            <div className="bg-amber-50 text-amber-800 p-4 rounded mb-4 flex items-center justify-between gap-4">
+              <span>Your subscription ends in {subscription.daysLeft} day{subscription.daysLeft === 1 ? "" : "s"}. Renew to stay listed.</span>
+              <Link href="/lawyer/billing"><Button size="sm" variant="outline">Renew</Button></Link>
             </div>
           )}
           <p className="text-gray-600">Manage your property law cases and paid consultation sessions.</p>
