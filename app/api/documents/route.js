@@ -1,127 +1,95 @@
 import { NextResponse } from "next/server"
+import mongoose from "mongoose"
 import { connectToDB } from "@/lib/db"
 import { Document } from "@/models/Document"
-import { getAuthUser } from "@/lib/getAuthUser"
+import { User } from "@/models/User"
+import { withApi, parseBody, parseQuery, requireUser, ApiError } from "@/lib/api"
+import { objectId, limitParam, text, z } from "@/lib/validation"
+import { verifyUploadedFile } from "@/lib/storage"
+import { downloadPath, toClientDocument } from "@/lib/documents"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req) {
-  try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+const ListSchema = z.object({
+  caseId: objectId.optional(),
+  bookingId: objectId.optional(),
+  shared: z.enum(["true", "false"]).optional(),
+  limit: limitParam(20, 100),
+})
 
-    const { searchParams } = new URL(req.url)
-    const caseId = searchParams.get("caseId")
-    const bookingId = searchParams.get("bookingId")
-    const shared = searchParams.get("shared") === "true"
-    const limit = parseInt(searchParams.get("limit")) || 20
+const CreateSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(200),
+  description: text(2000).optional(),
+  fileName: z.string().trim().min(1).max(255),
+  // Returned by Cloudinary after the direct upload
+  publicId: z.string().min(1).max(300),
+  resourceType: z.enum(["image", "raw", "video"]),
+  caseId: objectId.optional(),
+  bookingId: objectId.optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  sharedWith: z.array(z.object({ userId: objectId })).max(20).optional(),
+})
 
-    let query = { status: "active" }
+export const GET = withApi(async (req) => {
+  const user = await requireUser()
+  const { caseId, bookingId, shared, limit } = parseQuery(req, ListSchema)
+  await connectToDB()
 
-    if (shared) {
-      // Get documents shared with the user
-      query["sharedWith.userId"] = user.id
-    } else {
-      // Get documents uploaded by the user
-      query.uploadedBy = user.id
-    }
+  const query = { status: "active" }
+  if (shared === "true") query["sharedWith.userId"] = user.id
+  else query.uploadedBy = user.id
+  if (caseId) query.caseId = caseId
+  if (bookingId) query.bookingId = bookingId
 
-    if (caseId) {
-      query.caseId = caseId
-    }
+  const documents = await Document.find(query)
+    .populate("uploadedBy", "firstName lastName")
+    .populate("sharedWith.userId", "firstName lastName")
+    .sort({ createdAt: -1 })
+    .limit(limit)
 
-    if (bookingId) {
-      query.bookingId = bookingId
-    }
+  return NextResponse.json({ success: true, documents: documents.map(toClientDocument) })
+})
 
-    const documents = await Document.find(query)
-      .populate("uploadedBy", "firstName lastName")
-      .populate("sharedWith.userId", "firstName lastName")
-      .sort({ createdAt: -1 })
-      .limit(limit)
+export const POST = withApi(async (req) => {
+  const user = await requireUser()
+  const data = await parseBody(req, CreateSchema)
 
-    return NextResponse.json({
-      success: true,
-      documents
-    })
-  } catch (err) {
-    console.error("Error fetching documents:", err)
-    return NextResponse.json({ error: "Failed to fetch documents" }, { status: 500 })
+  // Confirm the file really was uploaded by this user and passes the type/size rules
+  const verified = await verifyUploadedFile({ publicId: data.publicId, resourceType: data.resourceType, userId: user.id })
+  if (!verified.ok) throw new ApiError(400, verified.reason)
+  const { file } = verified
+
+  await connectToDB()
+
+  const shareIds = [...new Set((data.sharedWith || []).map((s) => s.userId))].filter((id) => id !== user.id)
+  if (shareIds.length && (await User.countDocuments({ _id: { $in: shareIds } })) !== shareIds.length) {
+    throw new ApiError(400, "Cannot share with an unknown user")
   }
-}
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+  const _id = new mongoose.Types.ObjectId()
+  const document = await Document.create({
+    _id,
+    title: data.title,
+    description: data.description || "",
+    fileName: data.fileName,
+    fileUrl: downloadPath({ _id }),
+    fileSize: file.bytes,
+    fileType: file.extension,
+    storage: { provider: "cloudinary", publicId: file.publicId, resourceType: file.resourceType, format: file.format },
+    uploadedBy: user.id,
+    caseId: data.caseId,
+    bookingId: data.bookingId,
+    tags: data.tags || [],
+    sharedWith: shareIds.map((userId) => ({ userId, permission: "view" })),
+  })
 
-    const body = await req.json()
-    const { title, description, fileName, fileUrl, fileSize, fileType, caseId, bookingId, tags, sharedWith } = body
+  const populatedDocument = await Document.findById(document._id)
+    .populate("uploadedBy", "firstName lastName")
+    .populate("sharedWith.userId", "firstName lastName")
 
-    if (!title || !fileName || !fileUrl || !fileSize || !fileType) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
-
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024 // 10MB
-    if (fileSize > maxSize) {
-      return NextResponse.json({ error: "File size too large. Maximum size is 10MB" }, { status: 400 })
-    }
-
-    // Validate file type
-    const allowedTypes = ["pdf", "doc", "docx", "jpg", "jpeg", "png", "txt"]
-    const fileExtension = fileType.toLowerCase()
-    if (!allowedTypes.includes(fileExtension)) {
-      return NextResponse.json({ error: "File type not allowed" }, { status: 400 })
-    }
-
-    const documentData = {
-      title,
-      description: description || "",
-      fileName,
-      fileUrl,
-      fileSize,
-      fileType: fileExtension,
-      uploadedBy: user.id,
-      tags: tags || []
-    }
-
-    if (caseId) {
-      documentData.caseId = caseId
-    }
-
-    if (bookingId) {
-      documentData.bookingId = bookingId
-    }
-
-    if (sharedWith && Array.isArray(sharedWith)) {
-      documentData.sharedWith = sharedWith.map(share => ({
-        userId: share.userId,
-        permission: share.permission || "view"
-      }))
-    }
-
-    const document = await Document.create(documentData)
-
-    const populatedDocument = await Document.findById(document._id)
-      .populate("uploadedBy", "firstName lastName")
-      .populate("sharedWith.userId", "firstName lastName")
-
-    return NextResponse.json({
-      success: true,
-      document: populatedDocument,
-      message: "Document uploaded successfully"
-    })
-  } catch (err) {
-    console.error("Error uploading document:", err)
-    return NextResponse.json({ error: "Failed to upload document" }, { status: 500 })
-  }
-} 
+  return NextResponse.json({
+    success: true,
+    document: toClientDocument(populatedDocument),
+    message: "Document uploaded successfully",
+  })
+})

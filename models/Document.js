@@ -26,6 +26,14 @@ const DocumentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  // Where the file lives (Cloudinary authenticated asset). Older records predate
+  // real storage and have no storage info; their files can't be downloaded.
+  storage: {
+    provider: { type: String, enum: ["cloudinary"] },
+    publicId: { type: String },
+    resourceType: { type: String, enum: ["image", "raw", "video"] },
+    format: { type: String },
+  },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
