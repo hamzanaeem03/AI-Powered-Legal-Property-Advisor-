@@ -1,45 +1,23 @@
+import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { Booking } from "@/models/Booking"
-import { getCurrentUser } from "@/lib/getCurrentUser"
-import { NextResponse } from "next/server"
+import { withApi, parseBody, requireUser, ApiError } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
 
-export async function POST(req) {
-  console.log("🔍 access-check endpoint hit") // debug log
+const AccessCheckSchema = z.object({ lawyerId: objectId })
 
-  try {
-    await connectToDB()
-    const user = await getCurrentUser()
+export const POST = withApi(async (req) => {
+  const user = await requireUser()
+  const { lawyerId } = await parseBody(req, AccessCheckSchema)
 
-    if (!user) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
+  await connectToDB()
+  const booking = await Booking.findOne({
+    userId: user.id,
+    lawyerId,
+    accessStatus: "enabled",
+    expiresAt: { $gt: new Date() },
+  })
+  if (!booking) throw new ApiError(403, "No active booking found")
 
-    const body = await req.json()
-    const { lawyerId } = body
-
-    if (!lawyerId) {
-      return NextResponse.json({ message: "Lawyer ID is required" }, { status: 400 })
-    }
-
-    const now = new Date()
-
-    const booking = await Booking.findOne({
-      userId: user._id,
-      lawyerId,
-      accessStatus: "enabled",
-      expiresAt: { $gt: now },
-    })
-
-    if (!booking) {
-      return NextResponse.json({ message: "No active booking found" }, { status: 403 })
-    }
-
-    return NextResponse.json({
-      accessGranted: true,
-      bookingId: booking._id.toString(),
-    })
-  } catch (err) {
-    console.error("Access Check Error:", err)
-    return NextResponse.json({ message: "Server error" }, { status: 500 })
-  }
-}
+  return NextResponse.json({ accessGranted: true, bookingId: booking._id.toString() })
+})

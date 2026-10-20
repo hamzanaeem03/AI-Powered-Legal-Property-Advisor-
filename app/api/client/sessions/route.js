@@ -22,10 +22,11 @@ export async function GET() {
 
     // Fetch cases
     const cases = await Case.find({ userId: user.id })
-      .sort({ createdAt: -1 })
+      .sort({ date: -1 })
 
     // Format sessions data
-    const sessions = bookings.map(booking => ({
+    // Skip bookings whose lawyer account no longer exists
+    const sessions = bookings.filter(booking => booking.lawyerId).map(booking => ({
       id: booking._id,
       type: "booking",
       lawyer: {
@@ -47,6 +48,8 @@ export async function GET() {
     }))
 
     // Add cases as sessions
+    // Older cases have no createdAt; fall back to their `date` field
+    const caseDate = (case_) => new Date(case_.createdAt || case_.date || Date.now())
     const caseSessions = cases.map(case_ => ({
       id: case_._id,
       type: "case",
@@ -57,8 +60,8 @@ export async function GET() {
         rating: 0,
       },
       type: "case_management",
-      date: case_.createdAt.toISOString().split('T')[0],
-      time: case_.createdAt.toLocaleTimeString(),
+      date: caseDate(case_).toISOString().split('T')[0],
+      time: caseDate(case_).toLocaleTimeString(),
       duration: "Ongoing",
       price: "Free",
       status: case_.status,

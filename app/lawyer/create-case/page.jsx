@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 
 export default function CreateCasePage() {
   const [title, setTitle] = useState("");
-  const [lawyerEmail, setLawyerEmail] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -24,7 +23,7 @@ export default function CreateCasePage() {
       const res = await fetch("/api/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, lawyerEmail, clientEmail }),
+        body: JSON.stringify({ title, clientEmail }),
       });
 
       const data = await res.json();
@@ -52,10 +51,6 @@ export default function CreateCasePage() {
             <div>
               <Label>Case Title</Label>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
-            </div>
-            <div>
-              <Label>Lawyer Email</Label>
-              <Input type="email" value={lawyerEmail} onChange={(e) => setLawyerEmail(e.target.value)} required />
             </div>
             <div>
               <Label>Client Email</Label>

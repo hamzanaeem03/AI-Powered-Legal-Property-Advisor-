@@ -1,15 +1,18 @@
-import { getAuthUser } from "@/lib/getAuthUser"
-import {connectToDB} from "@/lib/db"
+import { NextResponse } from "next/server"
+import { connectToDB } from "@/lib/db"
 import { Booking } from "@/models/Booking"
+import { withApi, parseBody, requireUser } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
 
-export async function POST(req) {
+const ChatAccessSchema = z.object({ lawyerId: objectId })
+
+export const POST = withApi(async (req) => {
+  // Previously getAuthUser() wasn't awaited, so every request looked logged in with no id
+  const user = await requireUser()
+  const { lawyerId } = await parseBody(req, ChatAccessSchema)
+
   await connectToDB()
-  const user = getAuthUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
-
-  const { lawyerId } = await req.json()
-  console.log(lawyerId)
-  const booking = await Booking.findOne({
+  const booking = await Booking.exists({
     lawyerId,
     userId: user.id,
     accessStatus: "enabled",
@@ -18,8 +21,7 @@ export async function POST(req) {
   })
 
   if (!booking) {
-    return Response.json({ allowed: false, message: "No active access" })
+    return NextResponse.json({ allowed: false, message: "No active access" })
   }
-
-  return Response.json({ allowed: true })
-}
+  return NextResponse.json({ allowed: true })
+})

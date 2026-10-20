@@ -1,90 +1,60 @@
 // app/api/register/route.js
 import { NextResponse } from "next/server"
+import bcrypt from "bcryptjs"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
 import { emailService } from "@/lib/email"
+import { withApi, parseBody, ApiError } from "@/lib/api"
+import { email, password, personName, z } from "@/lib/validation"
+import { enforceRateLimit, clientIp, LIMITS } from "@/lib/rateLimit"
+import { signSessionToken, setSessionCookie, publicUser, EMAIL_COLLATION } from "@/lib/auth"
 
-export async function POST(req) {
-  try {
-    await connectToDB()
-    const body = await req.json()
-    const { firstName, lastName, email, password, userType } = body
+const RegisterSchema = z.object({
+  firstName: personName,
+  lastName: personName,
+  email,
+  password,
+  // Admin accounts must never be self-registered
+  userType: z.enum(["client", "lawyer"], { errorMap: () => ({ message: "Invalid user type" }) }),
+})
 
-    if (!firstName || !lastName || !email || !password || !userType) {
-      return NextResponse.json({ message: "Missing required fields" }, { status: 400 })
-    }
+export const POST = withApi(async (req) => {
+  await enforceRateLimit(`register:ip:${clientIp(req)}`, LIMITS.registerPerIp, "Too many sign-ups from this network. Please try again later.")
 
-    // Admin accounts must never be self-registered
-    if (!["client", "lawyer"].includes(userType)) {
-      return NextResponse.json({ message: "Invalid user type" }, { status: 400 })
-    }
+  const data = await parseBody(req, RegisterSchema)
 
-    if (typeof password !== "string" || password.length < 8) {
-      return NextResponse.json({ message: "Password must be at least 8 characters" }, { status: 400 })
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email })
-    if (existingUser) {
-      return NextResponse.json({ message: "User already exists" }, { status: 409 })
-    }
-
-    // Hash password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(password, saltRounds)
-
-    // Create user
-    const user = await User.create({
-      firstName,
-      lastName,
-      email,
-      password: hashedPassword,
-      userType,
-      verified: userType === "client" // Clients are auto-verified, lawyers need admin approval
-    })
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { id: user._id, firstName: user.firstName, email: user.email, userType: user.userType },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    )
-
-    // Send welcome email
-    try {
-      await emailService.sendWelcomeEmail(user)
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError)
-      // Don't fail registration if email fails
-    }
-
-    // Set cookie
-    const response = NextResponse.json({
-      success: true,
-      message: "Registration successful",
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        userType: user.userType,
-        verified: user.verified
-      }
-    })
-
-    response.cookies.set("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60 // 7 days (seconds)
-    })
-
-    return response
-  } catch (error) {
-    console.error("Registration error:", error)
-    return NextResponse.json({ message: "Something went wrong" }, { status: 500 })
+  await connectToDB()
+  const existingUser = await User.findOne({ email: data.email }).collation(EMAIL_COLLATION)
+  if (existingUser) {
+    throw new ApiError(409, "User already exists")
   }
-}
+
+  let user
+  try {
+    user = await User.create({
+      ...data,
+      password: await bcrypt.hash(data.password, 12),
+      verified: data.userType === "client", // Clients are auto-verified, lawyers need admin approval
+    })
+  } catch (err) {
+    if (err.code === 11000) throw new ApiError(409, "User already exists")
+    throw err
+  }
+
+  // Email failures must not fail registration
+  try {
+    await emailService.sendWelcomeEmail(user)
+    if (user.userType === "lawyer") {
+      await emailService.sendLawyerVerificationEmail(user)
+    }
+  } catch (emailError) {
+    console.error("Failed to send registration email:", emailError)
+  }
+
+  const response = NextResponse.json({
+    success: true,
+    message: "Registration successful",
+    user: publicUser(user),
+  })
+  return setSessionCookie(response, signSessionToken(user))
+})

@@ -1,41 +1,21 @@
 // app/api/lawyers/[lawyerId]/route.js
-
+import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { User } from "@/models/User"
-import { Review } from "@/models/Review"
-import { NextResponse } from "next/server"
+import { withApi, ApiError } from "@/lib/api"
+import { objectId } from "@/lib/validation"
+import { LAWYER_PUBLIC_SELECT, withRatings } from "@/lib/lawyers"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req, { params }) {
-  try {
-    await connectToDB()
-    const data = await params
-    console.log(data.lawyerId)
-    const lawyer = await User.findOne({
-      _id: data.lawyerId,
-      userType: "lawyer",
-    }).select("-password")
-    
-    if (!lawyer) {
-      return NextResponse.json({ error: "Lawyer not found" }, { status: 404 })
-    }
+export const GET = withApi(async (req, { params }) => {
+  const { lawyerId } = await params
+  if (!objectId.safeParse(lawyerId).success) throw new ApiError(400, "Invalid lawyer id")
 
-    // Fetch reviews for this lawyer
-    const reviews = await Review.find({ lawyerId: lawyer._id })
-    const avgRating = reviews.length > 0 
-      ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
-      : null
+  await connectToDB()
+  const lawyer = await User.findOne({ _id: lawyerId, userType: "lawyer" }).select(LAWYER_PUBLIC_SELECT)
+  if (!lawyer) throw new ApiError(404, "Lawyer not found")
 
-    const lawyerWithRating = {
-      ...lawyer.toObject(),
-      avgRating: avgRating ? parseFloat(avgRating) : null,
-      reviewCount: reviews.length
-    }
-
-    return NextResponse.json({ lawyer: lawyerWithRating }, { status: 200 })
-  } catch (err) {
-    console.error("Error fetching lawyer by ID:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
-  }
-}
+  const [lawyerWithRating] = await withRatings([lawyer])
+  return NextResponse.json({ lawyer: lawyerWithRating }, { status: 200 })
+})

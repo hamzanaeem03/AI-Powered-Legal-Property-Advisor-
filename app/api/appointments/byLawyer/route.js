@@ -1,24 +1,19 @@
-import { connectToDB } from "@/lib/db";
-import { Appointment } from "@/models/appointment";
-import { getAuthUser } from "@/lib/getAuthUser";
+import { NextResponse } from "next/server"
+import { connectToDB } from "@/lib/db"
+import { Appointment } from "@/models/appointment"
+import { withApi, parseQuery, requireUser, ApiError } from "@/lib/api"
+import { objectId, z } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const lawyerId = searchParams.get("lawyerId");
+const QuerySchema = z.object({ lawyerId: objectId })
 
-  if (!lawyerId) {
-    return new Response(JSON.stringify({ message: "lawyerId required" }), { status: 400 });
-  }
+export const GET = withApi(async (req) => {
+  const { lawyerId } = parseQuery(req, QuerySchema)
+  const user = await requireUser()
+  if (user.id !== lawyerId && user.userType !== "admin") throw new ApiError(403, "Forbidden")
 
-  const user = await getAuthUser();
-  if (!user || (user.id !== lawyerId && user.userType !== "admin")) {
-    return new Response(JSON.stringify({ message: "Unauthorized" }), { status: 401 });
-  }
-
-  await connectToDB();
-
-  const appointments = await Appointment.find({ lawyerId }).sort({ date: 1 });
-  return new Response(JSON.stringify(appointments), { status: 200 });
-}
+  await connectToDB()
+  const appointments = await Appointment.find({ lawyerId }).sort({ date: 1 }).limit(200)
+  return NextResponse.json(appointments)
+})

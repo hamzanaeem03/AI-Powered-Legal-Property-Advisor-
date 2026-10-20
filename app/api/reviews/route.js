@@ -2,101 +2,88 @@ import { NextResponse } from "next/server"
 import { connectToDB } from "@/lib/db"
 import { Review } from "@/models/Review"
 import { User } from "@/models/User"
+import { Booking } from "@/models/Booking"
 import { Notification } from "@/models/Notification"
-import { getAuthUser } from "@/lib/getAuthUser"
+import { emailService } from "@/lib/email"
+import { withApi, parseBody, parseQuery, requireUser, ApiError } from "@/lib/api"
+import { objectId, text, z } from "@/lib/validation"
+import { enforceRateLimit, LIMITS } from "@/lib/rateLimit"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req) {
-  try {
-    await connectToDB()
-    const { searchParams } = new URL(req.url)
-    const lawyerId = searchParams.get("lawyerId")
-    
-    if (!lawyerId) {
-      return NextResponse.json({ message: "Missing lawyerId" }, { status: 400 })
-    }
-    
-    const reviews = await Review.find({ lawyerId })
-      .populate("clientId", "firstName lastName")
-      .sort({ createdAt: -1 })
-    
-    const avgRating = reviews.length 
-      ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(2)
-      : null
-    
-    return NextResponse.json({ reviews, avgRating })
-  } catch (err) {
-    console.error("Error fetching reviews:", err)
-    return NextResponse.json({ message: "Server error" }, { status: 500 })
-  }
-}
+const ListSchema = z.object({ lawyerId: objectId })
 
-export async function POST(req) {
+const CreateSchema = z.object({
+  lawyerId: objectId,
+  rating: z.coerce.number().int("Rating must be a whole number").min(1, "Invalid rating").max(5, "Invalid rating"),
+  comment: text(1000).optional(),
+})
+
+export const GET = withApi(async (req) => {
+  const { lawyerId } = parseQuery(req, ListSchema)
+  await connectToDB()
+
+  const reviews = await Review.find({ lawyerId })
+    .populate("clientId", "firstName lastName")
+    .sort({ createdAt: -1 })
+    .limit(100)
+
+  const avgRating = reviews.length
+    ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(2)
+    : null
+
+  return NextResponse.json({ reviews, avgRating })
+})
+
+export const POST = withApi(async (req) => {
+  const sessionUser = await requireUser(["client"])
+  await enforceRateLimit(`review:${sessionUser.id}`, LIMITS.createReview)
+  const { lawyerId, rating, comment } = await parseBody(req, CreateSchema)
+
+  await connectToDB()
+  const [client, lawyer] = await Promise.all([User.findById(sessionUser.id), User.findById(lawyerId)])
+  if (!client) throw new ApiError(401, "Unauthorized")
+  if (!lawyer || lawyer.userType !== "lawyer") throw new ApiError(404, "Lawyer not found")
+
+  // Only clients who actually booked this lawyer may review them
+  const hasBooked = await Booking.exists({ lawyerId, userId: client._id })
+  if (!hasBooked) throw new ApiError(403, "You can only review lawyers you have booked")
+
+  let review
   try {
-    await connectToDB()
-    const user = await getAuthUser()
-    
-    if (!user || user.userType !== "client") {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    }
-    
-    const body = await req.json()
-    const { lawyerId, rating, comment } = body
-    
-    if (!lawyerId || !rating) {
-      return NextResponse.json({ message: "Missing required fields" }, { status: 400 })
-    }
-    
-    if (rating < 1 || rating > 5) {
-      return NextResponse.json({ message: "Invalid rating" }, { status: 400 })
-    }
-    
-    // Check if user has already reviewed this lawyer
-    const existingReview = await Review.findOne({ lawyerId, clientId: user.id })
-    if (existingReview) {
-      return NextResponse.json({ message: "You have already reviewed this lawyer" }, { status: 409 })
-    }
-    
-    // Get lawyer details for notification
-    const lawyer = await User.findById(lawyerId)
-    if (!lawyer) {
-      return NextResponse.json({ message: "Lawyer not found" }, { status: 404 })
-    }
-    
-    const review = await Review.create({
-      lawyerId,
-      clientId: user.id,
-      rating,
-      comment,
-    })
-    
-    // Create notification for lawyer about new review
-    await Notification.create({
-      userId: lawyerId,
+    review = await Review.create({ lawyerId, clientId: client._id, rating, comment })
+  } catch (err) {
+    if (err.code === 11000) throw new ApiError(409, "You have already reviewed this lawyer")
+    throw err
+  }
+
+  const clientName = `${client.firstName} ${client.lastName}`
+  const lawyerName = `${lawyer.firstName} ${lawyer.lastName}`
+
+  await Notification.insertMany([
+    {
+      userId: lawyer._id,
       type: "review",
       title: "New Review Received",
-      message: `${user.firstName} ${user.lastName} has left you a ${rating}-star review.`,
-      data: { reviewId: review._id, rating, clientName: `${user.firstName} ${user.lastName}` },
-      priority: "medium"
-    })
-    
-    // Create notification for client confirming review submission
-    await Notification.create({
-      userId: user.id,
+      message: `${clientName} has left you a ${rating}-star review.`,
+      data: { reviewId: review._id, rating, clientName },
+      priority: "medium",
+    },
+    {
+      userId: client._id,
       type: "review",
       title: "Review Submitted",
-      message: `Your review for ${lawyer.firstName} ${lawyer.lastName} has been submitted successfully.`,
-      data: { reviewId: review._id, lawyerName: `${lawyer.firstName} ${lawyer.lastName}` },
-      priority: "low"
-    })
-    
-    return NextResponse.json({ success: true, review })
-  } catch (err) {
-    if (err.code === 11000) {
-      return NextResponse.json({ message: "You have already reviewed this lawyer" }, { status: 409 })
-    }
-    console.error("Error creating review:", err)
-    return NextResponse.json({ message: "Server error" }, { status: 500 })
+      message: `Your review for ${lawyerName} has been submitted successfully.`,
+      data: { reviewId: review._id, lawyerName },
+      priority: "low",
+    },
+  ])
+
+  try {
+    await emailService.sendReviewNotification(lawyer, clientName, rating)
+  } catch (emailError) {
+    console.error("Failed to send review email:", emailError)
   }
-} 
+
+  return NextResponse.json({ success: true, review })
+})

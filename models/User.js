@@ -3,7 +3,7 @@ import mongoose from "mongoose"
 const UserSchema = new mongoose.Schema({
   firstName: { type: String, required: true },
   lastName:  { type: String, required: true },
-  email:     { type: String, required: true, unique: true },
+  email:     { type: String, required: true, unique: true, trim: true, lowercase: true },
   password:  { type: String, required: true },
   userType:  { type: String, enum: ["client", "lawyer", "admin"], required: true },
   specialization: { type: String, default: "property" },
@@ -43,5 +43,7 @@ const UserSchema = new mongoose.Schema({
     }
   }
 }, { timestamps: true })
+
+UserSchema.index({ userType: 1, verified: 1 })
 
 export const User = mongoose.models.User || mongoose.model("User", UserSchema)
