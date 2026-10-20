@@ -1,7 +1,9 @@
 import { Inter } from "next/font/google"
+import { headers } from "next/headers"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ToastProvider } from "@/components/ui/toast"
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -59,7 +61,13 @@ export const metadata = {
   },
 }
 
-export default function RootLayout({ children }) {
+// Every page is rendered per request so it carries the CSP nonce set in middleware.js
+export const dynamic = "force-dynamic"
+
+export default async function RootLayout({ children }) {
+  // next-themes injects an inline script, so it needs the per-request nonce
+  const nonce = (await headers()).get("x-nonce") ?? undefined
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -74,14 +82,7 @@ export default function RootLayout({ children }) {
         <link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#2563eb" />
         <meta name="msapplication-TileColor" content="#2563eb" />
         <meta name="msapplication-config" content="/browserconfig.xml" />
-        
-        {/* Preconnect to external domains for performance */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        
-        {/* DNS prefetch for performance */}
-        <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-        <link rel="dns-prefetch" href="//fonts.gstatic.com" />
+
       </head>
       <body className={inter.className}>
         <ThemeProvider
@@ -89,61 +90,14 @@ export default function RootLayout({ children }) {
           defaultTheme="light"
           enableSystem
           disableTransitionOnChange
+          nonce={nonce}
         >
           <ToastProvider>
             {children}
           </ToastProvider>
         </ThemeProvider>
         
-        {/* PWA Service Worker Registration */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js')
-                    .then(function(registration) {
-                      console.log('Service Worker registered successfully:', registration.scope);
-                      
-                      // Check for updates
-                      registration.addEventListener('updatefound', function() {
-                        const newWorker = registration.installing;
-                        newWorker.addEventListener('statechange', function() {
-                          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            // New content is available
-                            if (confirm('New version available! Reload to update?')) {
-                              window.location.reload();
-                            }
-                          }
-                        });
-                      });
-                    })
-                    .catch(function(error) {
-                      console.log('Service Worker registration failed:', error);
-                    });
-                });
-              }
-              
-              // Handle online/offline status
-              window.addEventListener('online', function() {
-                document.body.classList.remove('offline');
-                document.body.classList.add('online');
-              });
-              
-              window.addEventListener('offline', function() {
-                document.body.classList.remove('online');
-                document.body.classList.add('offline');
-              });
-              
-              // Check initial online status
-              if (navigator.onLine) {
-                document.body.classList.add('online');
-              } else {
-                document.body.classList.add('offline');
-              }
-            `,
-          }}
-        />
+        <ServiceWorkerRegistration />
       </body>
     </html>
   )
