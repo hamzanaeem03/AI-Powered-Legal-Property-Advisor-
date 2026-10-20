@@ -1,214 +1,128 @@
 # Legal Property Advisor
 
-AI-Powered Legal Consultation Platform for Property Law
+AI-powered legal consultation platform for property law in Pakistan. Clients get instant guidance from an AI assistant (Google Gemini), book verified lawyers for 48-hour consultations, chat with them, and keep their case documents in one place. Admins verify lawyers before they can take bookings.
 
----
+## Features
 
-A platform combining AI (Google Gemini) and real lawyers for property-related legal matters in Pakistan. Features lawyer booking, client–lawyer chat, case and document management, and admin tools.
+- **AI legal assistant**: Gemini answers property-law questions with relevant sections of Pakistani law, scoped to property issues only.
+- **Lawyer marketplace**: search verified lawyers, see ratings, book 48-hour access.
+- **Client–lawyer chat**: messaging between a client and a booked lawyer while the booking is active.
+- **Cases**: clients open cases; lawyers open cases for clients who booked them.
+- **Documents**: private uploads to Cloudinary, downloadable only by the owner and the people it's shared with, through short-lived links.
+- **Reviews**: clients rate lawyers they have booked.
+- **Email**: welcome, lawyer verification, booking, and review emails over SMTP, respecting each user's notification settings.
+- **Admin dashboard**: platform stats and lawyer verification.
+- **PWA**: installable, with an offline page.
 
-## 🚀 Key Features
+## Tech stack
 
-- **AI Legal Assistant**: Instant property law guidance via Gemini AI
-- **Client–Lawyer Chat**: Messaging between clients and booked lawyers (REST polling). A Socket.io server for real-time chat and WebRTC call signalling is included but not yet wired into the UI (see below)
-- **Booking System**: 48-hour lawyer access, real-time availability, secure sessions
-- **Case Management**: Create, track, and update legal cases with document uploads
-- **Document Storage**: Upload metadata and sharing. ⚠️ `lib/storage.js` is a stub that returns fake URLs; no file is actually stored yet
-- **Notifications**: In-app notifications. ⚠️ `lib/email.js` is a stub that only logs; no email is actually sent yet
-- **Admin Dashboard**: Analytics, lawyer verification, user management, revenue tracking
-- **PWA & Mobile**: Installable, offline support, push notifications, mobile-optimized UI
-- **Security**: JWT in an httpOnly cookie, bcrypt password hashing, role checks (client/lawyer/admin). No rate limiting yet
+Next.js 15 (App Router) · React 19 · MongoDB + Mongoose · Tailwind CSS + Radix UI · zod · jose / jsonwebtoken · Cloudinary · Nodemailer · Upstash Redis · Vitest
 
-## 🛠️ Technology Stack
+## Getting started
 
-**Frontend**
-- Next.js 14 (App Router)
-- React 18
-- TypeScript
-- Tailwind CSS
-- Framer Motion
-- Socket.io Client
-- PWA support
-
-**Backend**
-- Next.js API Routes
-- MongoDB + Mongoose
-- Socket.io (WebSocket server)
-- JWT, bcryptjs
-
-**AI & Services**
-- Google Gemini AI
-- Nodemailer (or similar) for email
-- Cloud Storage (S3, GCS, etc.)
-
-**Dev Tools**
-- ESLint, PostCSS, Autoprefixer
-
-## 📦 Quick Start
-
-1. **Clone & Install**
-   ```bash
-   git clone https://github.com/yourusername/legal-property-advisor.git
-   cd legal-property-advisor
-   npm install
-   # or
-   pnpm install
-   ```
-2. **Setup Environment**
-   ```bash
-   cp .env.example .env.local
-   # Edit .env.local with your credentials
-   ```
-3. **Run MongoDB** (local or Atlas)
-   ```bash
-   mongod
-   ```
-4. **Start Dev Server**
-   ```bash
-   npm run dev
-   # or
-   pnpm dev
-   ```
-5. **Access**: [http://localhost:3000](http://localhost:3000)
-
-## 🔧 Configuration
-
-**Environment Variables** (see `.env.example`):
-- `MONGODB_URI`, `JWT_SECRET`, `GEMINI_API_KEY`, `NEXT_PUBLIC_SITE_URL`
-- Email (stub): `FROM_EMAIL`, `FROM_NAME`
-- Storage (stub): `STORAGE_BASE_URL`, `STORAGE_BUCKET`
-
-> **Use a long random hex `JWT_SECRET`** (e.g. `openssl rand -hex 64`). Next.js expands `$NAME` inside `.env` values, so a secret containing `$` is silently truncated. Never commit `.env` files.
-
-### Real-time server (optional)
-
-`npm run dev` / `npm start` run plain Next.js. To also run the Socket.io server (`lib/socket.mjs`, authenticated by the same `token` cookie), use:
+Requires Node.js 20.9+ and a MongoDB database (local or Atlas).
 
 ```bash
-npm run dev:socket     # development
-npm run build && npm run start:socket   # production
+npm install
+cp .env.example .env.local   # then fill in the values
+npm run dev                  # http://localhost:3000
 ```
 
-This needs a host that runs a long-lived Node process (not Vercel serverless).
+Only `MONGODB_URI`, `JWT_SECRET` and `GEMINI_API_KEY` are needed to run locally. Without Cloudinary, uploads are disabled with a clear error; without SMTP, emails are logged to the console; without Upstash, rate limits are kept in memory.
 
-## 🏗️ Project Structure
+### Creating an admin
 
-```
-app/         # Next.js App Router (API, pages, dashboards)
-components/  # Reusable UI & chat/video components
-lib/         # Utilities: db, auth, email (stub), storage (stub), socket
-models/      # Mongoose models (User, Booking, Case, etc.)
-public/      # Static assets, manifest, service worker
-server.mjs   # Optional custom server that adds Socket.io
+Registration only allows `client` and `lawyer` accounts. To make an admin, register normally and then update the user in MongoDB:
+
+```js
+db.users.updateOne({ email: "you@example.com" }, { $set: { userType: "admin", verified: true } })
 ```
 
-## 📡 API Overview
+## Environment variables
 
-All API endpoints are under `/api/` and follow RESTful conventions. Authentication is required for most endpoints (JWT in the httpOnly `token` cookie). Registration only accepts `client` or `lawyer`; admin accounts must be created directly in the database.
+See [.env.example](.env.example) for the full list with comments.
 
-### Auth & User
-- `POST /api/login` — User login
-- `POST /api/register` — User registration
-- `GET /api/auth/me` — Get current user info
-- `POST /api/user/change-password` — Change password
-- `GET/PUT /api/user/profile` — Get/update user profile
-- `GET/PUT /api/user/settings` — Get/update user settings
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MONGODB_URI` | Yes | MongoDB connection string |
+| `JWT_SECRET` | Yes | Session signing key. Use `openssl rand -hex 64`; avoid `$`, which Next.js expands and truncates |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key for the AI assistant |
+| `NEXT_PUBLIC_SITE_URL` | Yes | Public site URL, used in email links |
+| `CLOUDINARY_URL` (or `CLOUDINARY_CLOUD_NAME` / `_API_KEY` / `_API_SECRET`) | For uploads | Document storage |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | For email | Outgoing mail server |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | On Vercel | Shared rate-limit store (the Vercel Upstash integration's `KV_REST_API_*` also work) |
 
-### Booking & Appointments
-- `POST /api/booking` — Book a lawyer (48-hour access)
-- `GET /api/booking/active` — Get active bookings
-- `GET /api/booking/check` — Check booking status
-- `POST /api/booking/access-check` — Check access for booking
-- `POST /api/appointments` — Create appointment
-- `GET /api/appointments/byLawyer` — Appointments for a lawyer
-- `GET /api/bookings/byLawyer` — Bookings for a lawyer
+## Deploying to Vercel
 
-### Lawyers
-- `GET /api/lawyers` — List verified lawyers
-- `GET /api/lawyers/search` — Search lawyers
-- `GET /api/lawyers/[lawyerId]` — Get lawyer by ID
-- `GET /api/lawyers/clients` — Get lawyer's cases (that lawyer or admin only)
-- `POST /api/lawyers/by-ids` — Get multiple lawyers by IDs
+1. Import the repository in Vercel (framework preset: Next.js).
+2. Add the environment variables above under **Project Settings → Environment Variables** for Production (and Preview if you use it).
+3. **Rate limiting:** add the Upstash Redis integration from the Vercel Marketplace. Without it, each serverless instance keeps its own counters and limits are much weaker.
+4. **MongoDB Atlas:** allow connections from Vercel (Network Access → `0.0.0.0/0`, or Vercel's static IPs on paid plans) and use a database user with access to this database only.
+5. **Cloudinary:** files are stored as `authenticated` assets. If PDF downloads fail, enable *Allow delivery of PDF and ZIP files* under Settings → Security.
+6. Deploy. The AI chat route sets `maxDuration = 60` because Gemini can take a while to answer.
 
-### Cases
-- `GET /api/cases` — List user cases
-- `POST /api/cases` — Create a case
-- `GET /api/caseoflawyer` — Cases for a lawyer (that lawyer or admin only)
+## Scripts
 
-### Chat & Messaging
-- `POST /api/chat` — AI legal assistant (Gemini, logged-in users only)
-- `GET/POST /api/lawyerchat` — Lawyer-client chat
-- `POST /api/lawyerchat/send` — Send message
-- `GET /api/lawyerchat/messages` — Get chat messages
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Development server |
+| `npm run build` / `npm start` | Production build / server |
+| `npm test` | API and unit tests (in-memory MongoDB; the first run downloads a MongoDB binary) |
+| `npm run typecheck` | TypeScript check |
+| `npm run lint` | ESLint |
+| `npm run dev:socket` / `start:socket` | Optional custom server with Socket.io (not usable on Vercel; see below) |
 
-### Documents
-- `GET/POST /api/documents` — List/upload documents
-- `PUT/DELETE /api/documents` — Update/delete documents
+CI (`.github/workflows/ci.yml`) runs lint, type check, tests, build and a production dependency audit on pushes to `main` and on pull requests.
 
-### Reviews & Notifications
-- `GET/POST /api/reviews` — List/add reviews
-- `GET/POST /api/notifications` — List/send notifications
+## Security model
 
-### Video Calls
-- `GET/POST /api/video-calls` — Call records (WebRTC signalling goes through the optional Socket.io server)
+- **Sessions:** HS256 JWT in an httpOnly, `SameSite=Strict`, `Secure` (in production) cookie, valid for 7 days.
+- **Access control:** `middleware.js` redirects logged-out users and users with the wrong role away from protected pages and blocks `/api/admin/*` for non-admins. Every API route also checks the session and ownership itself.
+- **CSRF:** cross-site `POST`/`PUT`/`PATCH`/`DELETE` requests are rejected using the `Origin` and `Sec-Fetch-Site` headers, on top of the SameSite cookie.
+- **Headers:** a per-request nonce Content-Security-Policy with `strict-dynamic`, plus HSTS, `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy and Permissions-Policy. API responses are `Cache-Control: no-store`.
+- **Input:** every API input is validated with zod (`lib/validation.js`); malformed ids return 400.
+- **Rate limits** (`lib/rateLimit.js`): login (per IP and per account), registration, password change, AI chat (per minute and per day), messages, bookings, reviews, cases and uploads.
+- **Data exposure:** public lawyer endpoints return a fixed set of public fields; email only if the lawyer enables "show email".
+- **Documents:** private Cloudinary assets; the server verifies each upload and issues 5-minute download links after a permission check.
+- **Offline cache:** the service worker caches static assets only, never API responses or pages; logout sends `Clear-Site-Data`.
 
-### Analytics & Admin
-- `GET /api/analytics` — Platform analytics (role-based)
-- `GET /api/admin/stats` — Admin stats
-- `POST /api/admin/verify-lawyer` — Verify lawyer
+## Project structure
 
-## 🗄️ Database Models (Mongoose)
-
-- **User**: name, email, password, userType (client/lawyer/admin), specialization, image, location, bio, verified, sessionRate, availableSlots, settings (notifications, privacy, preferences)
-- **Booking**: lawyerId, userId, accessStatus, expiresAt, status, createdAt
-- **Case**: title, status, lawyer, date, userId
-- **Review**: lawyerId, clientId, rating, comment (unique per lawyer-client)
-- **Notification**: userId, type, title, message, read, data, priority
-- **Document**: title, description, fileName, fileUrl, fileSize, fileType, uploadedBy, sharedWith, caseId, bookingId, isPublic, tags, status
-- **Message**: bookingId, senderId, senderType, content, timestamp, status
-
-## ⚡ Real-Time & Utilities
-
-- **WebSocket** (optional, `npm run dev:socket`): chat, typing, online status, video call signalling, notifications. The client components (`RealTimeChat`, `VideoCall`) are not yet used by any page
-- **Email** (stub): templates for welcome, booking, message, case, review, verification, password reset
-- **Storage** (stub): upload, validation and sharing API without a real storage backend
-
-## 📱 PWA & Mobile
-- Installable on iOS/Android
-- Offline support, push notifications
-- Touch-optimized, responsive, mobile navigation
-
-## 🔒 Security
-- JWT auth (httpOnly, `sameSite=strict` cookie), bcrypt password hashing (min. 8 characters)
-- Role checks (client/lawyer/admin); self-registration as admin is blocked
-- Not yet implemented: rate limiting, real file storage, CSRF tokens
-
-## 🚀 Deployment
-
-**Vercel**
-```bash
-npm i -g vercel
-vercel login
-vercel
-# Set env vars in dashboard
-vercel --prod
+```
+app/            Pages and API routes (App Router)
+  api/          Route handlers, one folder per endpoint
+components/     UI components (Radix-based primitives in components/ui)
+lib/            Server and shared logic: auth, api helpers, validation,
+                rate limiting, storage, email, Gemini, page access rules
+models/         Mongoose models
+middleware.js   Page access control, CSRF check, CSP
+tests/          Vitest suites (unit/ and api/)
+public/         PWA manifest, service worker, offline page
+server.mjs      Optional custom server with Socket.io
 ```
 
+## API overview
 
-## 🤝 Contributing
-- Fork, branch, commit, PR
-- Add tests if possible
+All endpoints are under `/api` and return JSON. Errors have the form `{ "success": false, "error": "...", "message": "..." }`.
 
-## 🗺️ Roadmap
-- [ ] Video calling (WebRTC)
-- [ ] Advanced analytics dashboard
-- [ ] Multi-language support
-- [ ] Document collaboration
-- [ ] AI-powered case analysis
-- [ ] Legal DB integration
-- [ ] Mobile app (React Native)
-- [ ] Advanced payment processing
-- [ ] Performance: DB indexing, CDN, image optimization, code splitting, caching
+| Area | Endpoints |
+| --- | --- |
+| Auth | `POST /login`, `POST /register`, `GET /auth/me`, `POST /auth/logout` (page route) |
+| Account | `GET/PUT /user/profile`, `GET/PUT /user/settings`, `POST /user/change-password` |
+| Lawyers | `GET /lawyers`, `GET /lawyers/search`, `GET /lawyers/[lawyerId]`, `POST /lawyers/by-ids`, `GET /lawyers/clients` |
+| Bookings | `POST /booking`, `GET /booking/active`, `GET /booking/check`, `POST /booking/access-check`, `GET /bookings/byLawyer` |
+| Appointments | `POST /appointments`, `GET /appointments/byLawyer` |
+| Chat | `POST /chat` (AI), `POST /lawyerchat`, `POST /lawyerchat/send`, `POST /lawyerchat/messages` |
+| Cases | `GET/POST /cases`, `GET /caseoflawyer` |
+| Documents | `POST /uploads/sign`, `GET/POST /documents`, `DELETE /documents/[id]`, `GET /documents/[id]/download` |
+| Other | `GET/POST /reviews`, `GET/POST /notifications`, `GET /client/sessions`, `GET /analytics` |
+| Admin | `GET /admin/stats`, `POST /admin/verify-lawyer` |
 
----
+## Known limitations
 
-**Built with ❤️ for the legal community** 
+- **Real-time chat and video calls:** chat polls the API. The Socket.io server (`lib/socket.mjs`, `server.mjs`) and the `RealTimeChat` / `VideoCall` components are not wired into any page, and Vercel can't host long-lived WebSocket servers. Real-time features would need a hosted service (e.g. Pusher, Ably, or a WebRTC provider) or a non-serverless host.
+- **Document sharing:** the API supports sharing, but the page has no recipient picker yet, so the Share button is disabled.
+- **Password reset:** not implemented.
+- **Sessions** can't be revoked before they expire (for example after a password change).
+- **PWA icons** referenced by `manifest.json` (`public/icons/`) don't exist yet.
+- **Payments** aren't implemented; admin "revenue" figures assume a flat $50 per booking.
